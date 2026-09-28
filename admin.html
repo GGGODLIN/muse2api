@@ -1058,9 +1058,9 @@ async function loadPool(){
           <button class="ghost mini" onclick="keepaliveOne('${a.id}')" title="静默刷新会话令牌与有效期">保活</button>
           <button class="ghost mini" onclick="queryQuota('${a.id}', this)">额度</button>
           <button class="ghost mini" onclick="toggleAcc('${a.id}', ${!a.enabled})">${a.enabled ? '禁用' : '启用'}</button>
-          <button class="ghost mini" onclick="renameAcc('${a.id}','${esc(a.label)}')">改名</button>
+          <button class="ghost mini" data-label="${esc(a.label)}" onclick="renameAcc('${a.id}', this.dataset.label)">改名</button>
           <button class="ghost mini" onclick="updateCookies('${a.id}')">更新Cookie</button>
-          <button class="danger mini" onclick="delAcc('${a.id}','${esc(a.label)}')">删除</button>
+          <button class="danger mini" data-label="${esc(a.label)}" onclick="delAcc('${a.id}', this.dataset.label)">删除</button>
         </div></td>
       </tr>`;
     }).join('');

@@ -140,6 +140,11 @@ class Config:
         for d in (self.base_dir, self.data_dir, self.media_dir, self.download_dir,
                   self.profile_dir):
             os.makedirs(d, exist_ok=True)
+            # 帳號 cookie、.env 與瀏覽器 profile 都在這些目錄下，只留給本人
+            try:
+                os.chmod(d, 0o700)
+            except OSError:
+                pass
 
 
 CFG = Config()

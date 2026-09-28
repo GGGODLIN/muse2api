@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import time
+from urllib.parse import urlparse
 
 import requests
 import websocket
@@ -14,7 +15,12 @@ class CDPError(RuntimeError):
 
 class CDP:
     def __init__(self, ws_url: str, timeout: float = 90.0, max_size: int = 256 << 20):
-        self.ws = websocket.create_connection(ws_url, timeout=timeout, max_size=max_size)
+        host = urlparse(ws_url).hostname
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            raise CDPError(f"拒絕連到非本機的 CDP WebSocket: {host}")
+        # 不送 Origin，Chrome 才會在沒有 --remote-allow-origins 的情況下接受連線
+        self.ws = websocket.create_connection(ws_url, timeout=timeout, max_size=max_size,
+                                              suppress_origin=True)
         self.timeout = timeout
         self._id = 0
 

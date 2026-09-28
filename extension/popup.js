@@ -11,17 +11,22 @@ const STORE = 'muse2api_ext_cfg';
 
 const ESSENTIAL = ['hatch_sess', 'hatch_gw', 'hatch_vml', 'hatch_native_auth_device'];
 
-function log(html, cls) {
+function log(msg, cls) {
+  // 用 textContent：訊息裡含上游回應與帳號標籤，不能當 HTML 解析
   const el = $('log');
   el.className = 'show';
-  el.innerHTML = cls ? `<span class="${cls}">${html}</span>` : html;
+  el.textContent = '';
+  const span = document.createElement('span');
+  if (cls) span.className = cls;
+  span.textContent = msg;
+  el.appendChild(span);
 }
 
 /* 规范化服务地址：去掉结尾斜杠和 /v1 后缀 */
 function normBase(v) {
   let s = (v || '').trim();
   if (!s) return '';
-  if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+  if (!/^https?:\/\//i.test(s)) s = 'http://' + s;
   s = s.replace(/\/+$/, '');
   s = s.replace(/\/v1$/i, '');
   return s;
@@ -33,18 +38,6 @@ async function loadCfg() {
   if (c.base) $('base').value = c.base;
   if (c.key) $('key').value = c.key;
   if (c.label) $('label').value = c.label;
-  // 没有配置过就尝试从当前标签页猜一个（用户在管理页上时）
-  if (!c.base) {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const u = tab && tab.url ? new URL(tab.url) : null;
-      if (u && /\/admin/.test(u.pathname)) {
-        $('base').value = u.origin;
-        const k = new URLSearchParams(u.search).get('key');
-        if (k) $('key').value = k;
-      }
-    } catch (e) { /* 忽略 */ }
-  }
 }
 
 async function saveCfg() {
@@ -75,6 +68,10 @@ async function run() {
   const label = $('label').value.trim();
 
   if (!base) return log('请先填服务地址', 'bad');
+  // fork：cookie 只准送到本機的 muse2api，避免被填成或猜成外部網址
+  if (!['127.0.0.1', 'localhost'].includes(new URL(base).hostname)) {
+    return log('只允许上传到本机服务，例如 http://127.0.0.1:18610', 'bad');
+  }
   if (!key) return log('请先填 API Key', 'bad');
 
   $('go').disabled = true;

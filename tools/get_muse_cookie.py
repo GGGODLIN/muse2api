@@ -354,9 +354,15 @@ def main() -> int:
         return 3
     say(f"浏览器：{chrome}")
 
-    profile = os.path.join(tempfile.gettempdir(), "muse2api-cookie-profile")
-    shutil.rmtree(profile, ignore_errors=True)
-    os.makedirs(profile, exist_ok=True)
+    # 埠上已有別的瀏覽器時，wait_cdp 會直接連上它、讀走它的 cookie
+    try:
+        wait_cdp(args.port, 1)
+        say(f"✗ 调试埠 {args.port} 已被其他浏览器占用，请先关闭它或改用 --port")
+        return 3
+    except RuntimeError:
+        pass
+    # 固定路徑的 profile 可能被別人預先放好；每次開一個只有本人可讀的新目錄
+    profile = tempfile.mkdtemp(prefix="muse2api-cookie-")
 
     args_cmd = [
         chrome,
@@ -431,10 +437,8 @@ def main() -> int:
         except RuntimeError as exc:
             say(f"✗ {exc}")
             say()
-            say("  cookie 已经抓到了，但上传失败。你可以手动复制下面这行，")
-            say("  粘贴到管理页面的「导入账号」输入框：")
-            say()
-            say("  " + "; ".join(f"{k}={v['value']}" for k, v in got.items()))
+            # 上游會在這裡把完整 cookie 印到終端；fork 不印，修好服務後重跑即可
+            say("  cookie 已经抓到了，但上传失败。请确认 muse2api 在跑、--base 与 --key 正确后重跑。")
             return 6
 
         say()

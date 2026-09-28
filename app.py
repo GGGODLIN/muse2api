@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import threading
 import time
 import uuid
@@ -67,8 +68,9 @@ app = FastAPI(title="muse2api", version="1.5.1")
 _origins = [o.strip() for o in (CFG.cors_origins or "").split(",") if o.strip()]
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
+# fork：上游解析了白名單卻固定放行 "*"；本機 relay 不需跨站，預設只留 muse.ai（Cookie 助手）
 app.add_middleware(CORSMiddleware,
-                   allow_origins=["*"],
+                   allow_origins=_origins or ["https://muse.ai"],
                    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
                    allow_headers=["*"],
                    expose_headers=["*"],
@@ -166,7 +168,8 @@ def resolve_model(name: str | None, default: str = "muse-image") -> str:
 # ------------------------- 鉴权 -------------------------
 def auth(authorization: str | None = Header(default=None)):
     if not CFG.api_key:
-        return True
+        # 上游在這裡直接放行；startup 沒跑到（或 key 被清空）時等於裸奔
+        raise HTTPException(503, "服务尚未配置 API Key")
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "缺少 Authorization: Bearer <key>")
     parts = authorization.split(None, 1)
@@ -219,6 +222,16 @@ def safe_chat_stream(cookies: dict, prompt: str, expires: dict | None,
     q = queue.Queue(maxsize=100)
     stop_event = threading.Event()
 
+    def put(item) -> bool:
+        # 阻塞式 put 看不到 stop_event：下游斷線後佇列滿了會永遠卡住並持有 GEN_LOCK
+        while not stop_event.is_set():
+            try:
+                q.put(item, timeout=1)
+                return True
+            except queue.Full:
+                continue
+        return False
+
     def worker():
         cur_id = account_id
         cur_cookies = cookies
@@ -252,8 +265,7 @@ def safe_chat_stream(cookies: dict, prompt: str, expires: dict | None,
                             account_id=cur_id, stop_event=stop_event
                         ):
                             yielded = True
-                            q.put(("data", chunk))
-                            if stop_event.is_set():
+                            if not put(("data", chunk)):
                                 return
                     if cur_id:
                         store.mark(cur_id, True, "")
@@ -274,9 +286,9 @@ def safe_chat_stream(cookies: dict, prompt: str, expires: dict | None,
                     if yielded:
                         break
             if last_exc is not None:
-                q.put(("error", last_exc))
+                put(("error", last_exc))
         finally:
-            q.put(("done", None))
+            put(("done", None))
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -805,7 +817,12 @@ def models(_=Depends(auth)):
 
 
 # ------------------------- 生图 -------------------------
-@app.post("/v1/images/generations")
+def media_disabled():
+    # fork 只當文字上游；媒體路由會處理使用者給的圖片來源、並把下載檔同源提供（安全審查 #1、#6）
+    raise HTTPException(404, "此 fork 已停用图片与视频接口")
+
+
+@app.post("/v1/images/generations", dependencies=[Depends(media_disabled)])
 async def images_generations(req: ImageRequest, _=Depends(auth)):
     ref_img = req.reference_image or req.image
     if isinstance(ref_img, dict):
@@ -832,7 +849,7 @@ async def images_generations(req: ImageRequest, _=Depends(auth)):
     return {"created": int(time.time()), "data": [item]}
 
 
-@app.post("/v1/images/edits")
+@app.post("/v1/images/edits", dependencies=[Depends(media_disabled)])
 async def images_edits(request: Request, _=Depends(auth)):
     """OpenAI 兼容的图生图/图像编辑接口，兼容 multipart/form-data 与 application/json。"""
     content_type = request.headers.get("content-type", "").lower()
@@ -918,8 +935,8 @@ async def images_edits(request: Request, _=Depends(auth)):
 
 
 # ------------------------- 生视频（异步任务） -------------------------
-@app.post("/v1/videos")
-@app.post("/v1/videos/generations")
+@app.post("/v1/videos", dependencies=[Depends(media_disabled)])
+@app.post("/v1/videos/generations", dependencies=[Depends(media_disabled)])
 async def create_video(req: VideoRequest, _=Depends(auth)):
     ref_img = None
     if req.reference_image:
@@ -1494,6 +1511,8 @@ def get_apikey(_=Depends(auth)):
 @app.post("/admin/apikey/rotate")
 def rotate_apikey(_=Depends(auth)):
     """生成新的 API Key，写入 .env 并立即生效（不用重启）。"""
+    # fork：環境變數優先於 .env，重啟後舊 Key 會復活，所以停用介面旋轉
+    raise HTTPException(409, "此 fork 停用介面旋轉 Key：请修改启动环境的 MUSE2API_KEY 后重启")
     import secrets
     new_key = "m2a_" + secrets.token_hex(24)
     old = CFG.api_key
@@ -1518,8 +1537,9 @@ def _persist_env(key: str, value: str):
             found = True
     if not found:
         lines.append(f"{key}={value}")
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    # 一般 open() 在 umask 022 下會把 .env 變成 0644；mkstemp 預設 0600
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".env.")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write("\n".join(lines).strip() + "\n")
     os.replace(tmp, path)
 
@@ -1798,7 +1818,8 @@ async def _startup():
         new_key = "m2a_" + secrets.token_hex(24)
         CFG.api_key = new_key
         _persist_env("MUSE2API_KEY", new_key)
-        log.info("🔑 未检测到 MUSE2API_KEY，已自动生成初始密钥: %s", new_key)
+        log.info("🔑 未检测到 MUSE2API_KEY，已自动生成初始密钥（%s…），完整值见 %s",
+                 new_key[:8], os.path.join(CFG.base_dir, ".env"))
     asyncio.create_task(_keepalive_loop())
 
 

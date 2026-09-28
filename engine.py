@@ -24,6 +24,8 @@ from cdp import CDP, http_json
 
 log = logging.getLogger("muse2api")
 
+# muse.ai 這幾條登入 cookie 原本就是 HttpOnly；注入時不設會讓頁面 JS 讀得到
+HTTPONLY_COOKIES = {"hatch_sess", "hatch_gw", "hatch_vml", "hatch_native_auth_device"}
 ATT_SEL = '[data-testid^="hatch-chat-attachment-presentation-"]'
 
 # 决定账号生死的核心 cookie（缺失或过期 = 会话失效）
@@ -62,25 +64,24 @@ class MuseEngine:
         env["PATH"] = (self.cfg.extra_path + os.pathsep + env.get("PATH", "")) if self.cfg.extra_path else env.get("PATH", "")
         args = [
             self.cfg.chromium,
-            "--headless=new", "--no-sandbox", "--disable-gpu",
+            "--headless=new", "--disable-gpu",
             "--disable-dev-shm-usage", "--disable-background-networking",
             "--no-first-run", "--no-default-browser-check",
             "--autoplay-policy=no-user-gesture-required",
             "--window-size=1440,2400",
             f"--remote-debugging-port={self.cfg.cdp_port}",
-            "--remote-allow-origins=*",
             f"--user-data-dir={self.cfg.profile_dir}",
             "about:blank",
         ]
-        # 尝试复用已有健康 CDP
+        # 埠上已有別的 CDP 就停：接管後 _open_page 會關掉它全部分頁、_apply_cookies 會清它的 cookie
         if not self.proc:
             try:
                 v = http_json(self._debug_url(), timeout=1)
-                if v and "webSocketDebuggerUrl" in v:
-                    self.browser = CDP(v["webSocketDebuggerUrl"], timeout=180)
-                    return
             except Exception:
-                pass
+                v = None
+            if v and "webSocketDebuggerUrl" in v:
+                raise MuseGenerationError(
+                    f"CDP 埠 {self.cfg.cdp_port} 已被其他瀏覽器佔用，拒絕接管；請換 MUSE2API_CDP_PORT")
 
         # 清理残留锁
         for lock_name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
@@ -216,6 +217,7 @@ class MuseEngine:
                     "domain": dom,
                     "path": "/",
                     "secure": True,
+                    "httpOnly": name in HTTPONLY_COOKIES,
                     "expires": exp_val,
                 }
                 try:
@@ -948,25 +950,10 @@ class MuseEngine:
             if ";" in parts[0]:
                 mime = parts[0].split(";")[0].replace("data:", "").strip()
             return (parts[1].strip() if len(parts) > 1 else ""), mime
-        if img.startswith("http://") or img.startswith("https://"):
-            try:
-                req = urllib.request.Request(img, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=20) as resp:
-                    data = resp.read()
-                    mime = resp.headers.get_content_type() or "image/png"
-                    return base64.b64encode(data).decode("ascii"), mime
-            except Exception as e:
-                log.warning("下载远程参考图失败: %s", e)
-                return "", "image/png"
-        if os.path.isfile(img):
-            try:
-                with open(img, "rb") as f:
-                    data = f.read()
-                    mime = mimetypes.guess_type(img)[0] or "image/png"
-                    return base64.b64encode(data).decode("ascii"), mime
-            except Exception as e:
-                log.warning("读取本地参考图失败: %s", e)
-                return "", "image/png"
+        # 上游在這裡會下載任意 URL（SSRF）或讀任意本機路徑送進 Muse；fork 只收內嵌資料
+        if img.startswith(("http://", "https://")) or os.path.isabs(img) or os.path.exists(img):
+            log.warning("拒絕非內嵌的參考圖輸入")
+            return "", "image/png"
         return img, "image/png"
 
     def _clear_attachments(self):
