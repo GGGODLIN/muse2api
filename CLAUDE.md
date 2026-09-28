@@ -39,5 +39,5 @@ MUSE2API_HOME=/tmp/m2a-test MUSE2API_KEY=m2a_testkey MUSE2API_PORT=18699 \
 
 ## 已知但尚未處理
 
-- GPT-6 Pro 安全審查（2026-09-28 送出，審的是未修改的 `bc06165`）的結果尚未納入；收到後把接受的項目補進上面的 patch 清單。
+- GPT-6 Pro 安全審查（2026-09-28，審未修改的 `bc06165`）找到 12 項＋4 則補洞，裁決與修復狀態見 [docs/security-review-rulings.md](/docs/security-review-rulings.md)。**接進 free 池前必修第 1、2、3、7 條**（參考圖讀本機檔、`--no-sandbox`、跨請求共用對話、串流取消卡死）。修掉一條就把它搬進上面的 patch 清單，並在裁決表標「已修」。
 - 帳號風險不因 fork 改變：這是規避 Meta 地區限制並自動操作網頁，帳號可能被封。
