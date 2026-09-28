@@ -65,7 +65,7 @@ def _detect_chromium() -> str:
 @dataclass
 class Config:
     base_dir: str = field(default_factory=lambda: _env("MUSE2API_HOME", _DEFAULT_BASE_DIR))
-    host: str = field(default_factory=lambda: _env("MUSE2API_HOST", "0.0.0.0"))
+    host: str = field(default_factory=lambda: _env("MUSE2API_HOST", "127.0.0.1"))
     port: int = field(default_factory=lambda: int(_env("MUSE2API_PORT", "18610")))
 
     # 浏览器

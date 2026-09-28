@@ -7,10 +7,11 @@ services:
     container_name: muse2api
     restart: always
     ports:
-      - "18610:18610"
+      # 只發佈到本機迴環；容器內仍需 0.0.0.0
+      - "127.0.0.1:18610:18610"
     environment:
-      # 管理与 API 鉴权 Key（建议修改，或留空让系统自动生成）
-      - MUSE2API_KEY=m2a_change_me_to_your_secure_key
+      # 範例金鑰會讓所有照預設部署的人共用同一把；留空則首次啟動自動生成
+      - MUSE2API_KEY=${MUSE2API_KEY:-}
       # 服务对外基准 URL，如 https://your-domain.com（留空则管理前端自动检测当前域名）
       - MUSE2API_PUBLIC_BASE=
       # 超时配置（秒）

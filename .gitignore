@@ -58,3 +58,4 @@ Thumbs.db
 *.zip
 *.tar.gz
 *.tar
+.venv/

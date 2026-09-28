@@ -1305,6 +1305,8 @@ function dismissUpdateBanner(){
 }
 
 async function loadRepoStatus(force){
+  // fork 已移除後端更新端點；提早返回，避免瀏覽器改打 api.github.com 兜底檢查
+  return;
   try{
     let s = await api('/admin/update/check' + (force ? '?force=true' : ''));
     // 若服务端网络无法直连 GitHub API，则由用户浏览器端直接请求 GitHub API 兜底检测
@@ -1385,6 +1387,9 @@ async function loadRepoStatus(force){
 }
 
 async function upgradeNow(){
+  // fork 不做線上升級：更新走人工 review 後 git merge upstream（見 CLAUDE.md）
+  alert('此 fork 已停用線上升級，請手動合併上游。');
+  return;
   if (!confirm('确定立即从 GitHub 官方仓库 (czg86389-hub/muse2api) 拉取最新代码并自动重启服务吗？\n\n（注：本地 .env 密钥、账号池 Cookie 和已生成的媒体文件均会自动保留，不受任何影响）')) return;
   const btn1 = $('btnRepoPull'), btn2 = $('btnBannerUpgrade');
   if (btn1) { btn1.disabled = true; btn1.innerHTML = '<span class="spin"></span>正在在线更新…'; }
